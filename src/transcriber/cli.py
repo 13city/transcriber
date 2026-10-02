@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .batch import discover_jobs, run_batch, select_jobs
 from .config import Settings
 from .pipeline import normalize_raw_transcript, process_audio
 from .record import detect_monitor_source, record_lecture
@@ -51,12 +52,58 @@ def _parser() -> argparse.ArgumentParser:
 
     normalize = sub.add_parser(
         "normalize",
-        help="Normalize an existing timestamped raw transcript",
+        help="Normalize an existing timestamped or plain-text transcript",
     )
     normalize.add_argument("raw_transcript", type=Path)
     normalize.add_argument("--output", type=Path)
     normalize.add_argument("--no-llm", action="store_true")
     normalize.add_argument("--no-punctuation-model", action="store_true")
+
+    batch = sub.add_parser(
+        "batch",
+        help="Sequentially clean one, several, or all transcripts in a directory tree",
+    )
+    batch.add_argument(
+        "input_dir",
+        nargs="?",
+        type=Path,
+        default=Path("recordings"),
+        help="Directory containing .txt/.raw.txt/.flac lecture files (default: recordings)",
+    )
+    mode = batch.add_mutually_exclusive_group(required=False)
+    mode.add_argument(
+        "--all",
+        action="store_true",
+        help="Process every discovered lecture",
+    )
+    mode.add_argument(
+        "--select",
+        nargs="+",
+        metavar="LECTURE",
+        help="Process only the named lecture(s); extensions are optional",
+    )
+    batch.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Destination for all cleaned transcripts (default: INPUT/Cleaned-Transcriptions)",
+    )
+    batch.add_argument(
+        "--list",
+        action="store_true",
+        help="List discovered lectures without loading models or processing files",
+    )
+    batch.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace cleaned transcripts that already exist",
+    )
+    batch.add_argument(
+        "--stop-on-error",
+        action="store_true",
+        help="Stop immediately if one lecture fails instead of continuing",
+    )
+    batch.add_argument("--no-llm", action="store_true")
+    batch.add_argument("--no-punctuation-model", action="store_true")
 
     sub.add_parser(
         "audio-source",
@@ -128,7 +175,59 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Clean transcript: {output}")
             return 0
 
-    except (FileNotFoundError, FileExistsError, RuntimeError, ValueError) as exc:
+        if args.command == "batch":
+            input_dir = args.input_dir.expanduser().resolve()
+            output_dir = (
+                args.output_dir.expanduser().resolve()
+                if args.output_dir
+                else input_dir / "Cleaned-Transcriptions"
+            )
+
+            if args.list:
+                jobs = select_jobs(
+                    discover_jobs(input_dir, output_dir),
+                    args.select,
+                )
+                if not jobs:
+                    print("No lectures found.")
+                    return 0
+                for job in jobs:
+                    print(f"{job.name}\t{job.source_type}\t{job.source}")
+                return 0
+
+            if not args.all and not args.select:
+                print(
+                    "error: choose --all or --select LECTURE [LECTURE ...]. "
+                    "Use --list to inspect discovered lectures.",
+                    file=sys.stderr,
+                )
+                return 2
+
+            summary = run_batch(
+                input_dir=input_dir,
+                output_dir=output_dir,
+                settings=settings,
+                selections=args.select,
+                force=args.force,
+                stop_on_error=args.stop_on_error,
+                use_punctuation_model=not args.no_punctuation_model,
+                use_llm=not args.no_llm,
+            )
+            print(
+                "\nBatch complete: "
+                f"{summary.completed} completed, "
+                f"{summary.skipped} skipped, "
+                f"{summary.failed} failed."
+            )
+            return 1 if summary.failed else 0
+
+    except (
+        FileNotFoundError,
+        FileExistsError,
+        NotADirectoryError,
+        RuntimeError,
+        ValueError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

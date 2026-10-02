@@ -15,28 +15,43 @@ from .text import (
 )
 
 
+def _load_source_text(raw_path: Path) -> tuple[str, str]:
+    """Load a timestamped Whisper transcript or fall back to plain text."""
+    segments = parse_timestamped_transcript(raw_path)
+    if segments:
+        segments = deduplicate_segments(segments)
+        return segments_to_plain_text(segments), "timestamped"
+
+    text = raw_path.read_text(encoding="utf-8").strip()
+    if not text:
+        raise ValueError(f"Transcript is empty: {raw_path}")
+    return text, "plain-text"
+
+
 def normalize_raw_transcript(
     raw_path: Path,
     output_path: Path,
     settings: Settings,
     use_punctuation_model: bool = True,
     use_llm: bool = True,
+    punctuator: FullStopPunctuator | None = None,
+    normalizer: QwenNormalizer | None = None,
 ) -> Path:
-    segments = parse_timestamped_transcript(raw_path)
-    if not segments:
-        raise ValueError(f"No timestamped segments found in {raw_path}")
+    raw_path = raw_path.expanduser().resolve()
+    output_path = output_path.expanduser().resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    segments = deduplicate_segments(segments)
-    text = segments_to_plain_text(segments)
+    text, source_mode = _load_source_text(raw_path)
 
     punctuation_used = False
     if use_punctuation_model and sentence_punctuation_density(text) < 0.012:
-        punctuator = FullStopPunctuator(settings.punctuation_model)
-        text = punctuator.restore(text)
+        active_punctuator = punctuator or FullStopPunctuator(settings.punctuation_model)
+        text = active_punctuator.restore(text)
         punctuation_used = True
 
     audit: dict[str, object] = {
         "source": str(raw_path),
+        "source_mode": source_mode,
         "output": str(output_path),
         "punctuation_model": settings.punctuation_model if punctuation_used else None,
         "normalizer_model": settings.normalizer_model if use_llm else None,
@@ -45,11 +60,12 @@ def normalize_raw_transcript(
     }
 
     if use_llm:
-        result = QwenNormalizer(
+        active_normalizer = normalizer or QwenNormalizer(
             settings.normalizer_model,
             device_map=settings.normalizer_device_map,
             chunk_words=settings.normalize_chunk_words,
-        ).normalize(text)
+        )
+        result = active_normalizer.normalize(text)
         text = result.text
         audit.update(
             {

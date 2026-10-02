@@ -32,13 +32,7 @@ Qwen runs in non-thinking mode with deterministic decoding and a restrictive edi
 
 ```bash
 sudo apt update
-sudo apt install -y ffmpeg python3 python3-venv python3-pip git
-```
-
-The recorder uses the PulseAudio compatibility interface exposed by PipeWire. `pactl` is normally provided by `pulseaudio-utils`:
-
-```bash
-sudo apt install -y pulseaudio-utils
+sudo apt install -y ffmpeg python3 python3-venv python3-pip git pulseaudio-utils
 ```
 
 ## Install
@@ -78,28 +72,92 @@ recordings/
 
 The `recordings/` directory and lecture media/transcript artifacts are gitignored by default.
 
+## Batch-clean an existing lecture collection
+
+The batch command is designed for a directory containing many old `.flac` + `.txt` pairs or the newer per-lecture directory format. It searches recursively.
+
+For each lecture it prefers, in order:
+
+1. `Lecture.raw.txt`
+2. `Lecture.txt`
+3. `Lecture.flac`
+
+That means an existing transcript is normalized directly instead of wasting time transcribing the FLAC again. If only a FLAC exists, Faster Whisper is run first.
+
+All cleaned transcripts are written into one directory:
+
+```text
+recordings/
+└── Cleaned-Transcriptions/
+    ├── Assessing-Endurance-Performance.txt
+    ├── Assessing-Endurance-Performance.audit.json
+    ├── Threshold-Testing.txt
+    ├── Threshold-Testing.audit.json
+    └── ...
+```
+
+Original FLAC and transcript files are left untouched.
+
+First inspect what will be processed:
+
+```bash
+transcriber batch --list
+```
+
+Process every discovered lecture sequentially:
+
+```bash
+transcriber batch --all
+```
+
+Process one:
+
+```bash
+transcriber batch --select Assessing-Endurance-Performance
+```
+
+Process several in one run:
+
+```bash
+transcriber batch --select Assessing-Endurance-Performance Threshold-Testing VO2-Max-Testing
+```
+
+If your source collection is somewhere other than `recordings/`:
+
+```bash
+transcriber batch /path/to/lecture-folder --all
+```
+
+Choose a different output directory:
+
+```bash
+transcriber batch /path/to/lecture-folder --all \
+  --output-dir /path/to/Cleaned-Transcriptions
+```
+
+The Qwen and punctuation models are loaded once and reused as the program moves from lecture to lecture. Processing is strictly sequential, so only one lecture is normalized at a time.
+
+If the batch is interrupted, rerun the same command. Existing cleaned transcripts are skipped automatically. To deliberately replace them:
+
+```bash
+transcriber batch --all --force
+```
+
+A failed lecture is reported and the batch continues to the next one. Use `--stop-on-error` if you instead want the first failure to halt the run.
+
 ## Process an existing recording
 
 ```bash
 transcriber process recordings/Assessing-Endurance-Performance/Assessing-Endurance-Performance.flac
 ```
 
-## Normalize a transcript already produced by the old script
+## Normalize an existing transcript
 
-The input must use the existing timestamp format:
-
-```text
-[00:00:02 --> 00:00:06]
-Welcome to Module 2 of the Cycling Science course.
-```
-
-Run:
+Timestamped Faster Whisper output and ordinary plain-text transcripts are both accepted:
 
 ```bash
 transcriber normalize path/to/Assessing-Endurance-Performance.raw.txt
 ```
-
-To preserve an old transcript before normalization, rename it to `.raw.txt` first.
 
 ## Model and resource controls
 
@@ -114,14 +172,6 @@ export TRANSCRIBER_NORMALIZER_MODEL=Qwen/Qwen3-8B
 export TRANSCRIBER_NORMALIZER_DEVICE_MAP=auto
 export TRANSCRIBER_NORMALIZE_CHUNK_WORDS=650
 ```
-
-`Qwen/Qwen3-8B` is the quality-oriented default. On a CPU-only machine with limited RAM, a smaller Qwen3 instruction model can be selected without changing the pipeline, for example:
-
-```bash
-export TRANSCRIBER_NORMALIZER_MODEL=Qwen/Qwen3-4B
-```
-
-Then run the same commands normally.
 
 To see the active model configuration:
 
