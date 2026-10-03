@@ -15,7 +15,6 @@ dependencies = [
   "transformers>=4.51.0",
   "torch>=2.4.0",
   "accelerate>=1.0.0",
-  "deepmultilingualpunctuation>=1.0.1",
 ]
 
 [project.optional-dependencies]

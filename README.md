@@ -24,6 +24,8 @@ Defaults:
 - punctuation: `oliverguhr/fullstop-punctuation-multilang-large`
 - transcript normalization: `Qwen/Qwen3-8B` through Hugging Face Transformers
 
+The FullStop model is called directly through the current Transformers token-classification API. The project does not depend on the older `deepmultilingualpunctuation` wrapper, which uses a removed `grouped_entities` argument in some released versions.
+
 The punctuation model is invoked only when the transcript is unusually sparse in sentence punctuation. Faster Whisper often already supplies useful punctuation, and avoiding unnecessary restoration protects technical notation, decimals, and abbreviations.
 
 Qwen runs in non-thinking mode with deterministic decoding and a restrictive editor prompt. It is told not to summarize, add outside knowledge, or silently guess uncertain terminology. An audit JSON flags unusually large changes in transcript length.
@@ -40,8 +42,8 @@ sudo apt install -y ffmpeg python3 python3-venv python3-pip git pulseaudio-utils
 ```bash
 git clone https://github.com/13city/transcriber.git
 cd transcriber
-python3 -m venv lecture-transcription-env
-source lecture-transcription-env/bin/activate
+python3 -m venv transcriber-env
+source transcriber-env/bin/activate
 pip install --upgrade pip
 pip install -e .
 ```
@@ -50,31 +52,15 @@ Model weights are downloaded once from Hugging Face and cached locally. Lecture 
 
 ## Record and process a lecture
 
-The title can contain normal spaces. The tool creates a filesystem-safe hyphenated directory and matching filenames automatically:
-
 ```bash
 transcriber record "Assessing Endurance Performance"
 ```
 
 After you press `q` to stop FFmpeg, the tool automatically transcribes and normalizes the recording.
 
-Result:
-
-```text
-recordings/
-└── Assessing-Endurance-Performance/
-    ├── Assessing-Endurance-Performance.flac
-    ├── Assessing-Endurance-Performance.raw.txt
-    ├── Assessing-Endurance-Performance.segments.json
-    ├── Assessing-Endurance-Performance.txt
-    └── Assessing-Endurance-Performance.audit.json
-```
-
-The `recordings/` directory and lecture media/transcript artifacts are gitignored by default.
-
 ## Batch-clean an existing lecture collection
 
-The batch command is designed for a directory containing many old `.flac` + `.txt` pairs or the newer per-lecture directory format. It searches recursively.
+The batch command searches recursively and supports old `.flac` + `.txt` pairs as well as the newer per-lecture directory format.
 
 For each lecture it prefers, in order:
 
@@ -82,68 +68,41 @@ For each lecture it prefers, in order:
 2. `Lecture.txt`
 3. `Lecture.flac`
 
-That means an existing transcript is normalized directly instead of wasting time transcribing the FLAC again. If only a FLAC exists, Faster Whisper is run first.
+Existing transcripts are normalized directly. A FLAC is transcribed only when no transcript exists.
 
-All cleaned transcripts are written into one directory:
+Cleaned transcripts are consolidated into:
 
 ```text
-recordings/
-└── Cleaned-Transcriptions/
-    ├── Assessing-Endurance-Performance.txt
-    ├── Assessing-Endurance-Performance.audit.json
-    ├── Threshold-Testing.txt
-    ├── Threshold-Testing.audit.json
-    └── ...
+recordings/Cleaned-Transcriptions/
 ```
 
-Original FLAC and transcript files are left untouched.
-
-First inspect what will be processed:
+Inspect the queue:
 
 ```bash
-transcriber batch --list
+transcriber batch ~/lecture-transcriber/recordings --list
 ```
 
-Process every discovered lecture sequentially:
+Process all lectures sequentially:
 
 ```bash
-transcriber batch --all
+transcriber batch ~/lecture-transcriber/recordings --all
 ```
 
 Process one:
 
 ```bash
-transcriber batch --select Assessing-Endurance-Performance
+transcriber batch ~/lecture-transcriber/recordings \
+  --select Assessing-Endurance-Performance
 ```
 
-Process several in one run:
+Process several:
 
 ```bash
-transcriber batch --select Assessing-Endurance-Performance Threshold-Testing VO2-Max-Testing
+transcriber batch ~/lecture-transcriber/recordings \
+  --select Assessing-Endurance-Performance Threshold-Testing VO2-Max-Testing
 ```
 
-If your source collection is somewhere other than `recordings/`:
-
-```bash
-transcriber batch /path/to/lecture-folder --all
-```
-
-Choose a different output directory:
-
-```bash
-transcriber batch /path/to/lecture-folder --all \
-  --output-dir /path/to/Cleaned-Transcriptions
-```
-
-The Qwen and punctuation models are loaded once and reused as the program moves from lecture to lecture. Processing is strictly sequential, so only one lecture is normalized at a time.
-
-If the batch is interrupted, rerun the same command. Existing cleaned transcripts are skipped automatically. To deliberately replace them:
-
-```bash
-transcriber batch --all --force
-```
-
-A failed lecture is reported and the batch continues to the next one. Use `--stop-on-error` if you instead want the first failure to halt the run.
+The normalization models are loaded once and reused as the process moves from lecture to lecture. Existing cleaned transcripts are skipped automatically, so an interrupted batch can simply be rerun. Use `--force` only when you deliberately want to regenerate completed outputs.
 
 ## Process an existing recording
 
@@ -153,15 +112,13 @@ transcriber process recordings/Assessing-Endurance-Performance/Assessing-Enduran
 
 ## Normalize an existing transcript
 
-Timestamped Faster Whisper output and ordinary plain-text transcripts are both accepted:
+Both timestamped Faster Whisper output and ordinary plain-text transcripts are accepted:
 
 ```bash
 transcriber normalize path/to/Assessing-Endurance-Performance.raw.txt
 ```
 
 ## Model and resource controls
-
-Environment variables:
 
 ```bash
 export TRANSCRIBER_WHISPER_MODEL=large-v3
@@ -173,38 +130,10 @@ export TRANSCRIBER_NORMALIZER_DEVICE_MAP=auto
 export TRANSCRIBER_NORMALIZE_CHUNK_WORDS=650
 ```
 
-To see the active model configuration:
+To see the active configuration:
 
 ```bash
 transcriber models
-```
-
-## Audio source detection
-
-The recorder normally discovers the default sink monitor automatically:
-
-```bash
-transcriber audio-source
-```
-
-If multiple monitor sources exist, specify one explicitly:
-
-```bash
-transcriber record "Lecture Title" --source alsa_output.pci-0000_00_1f.3.analog-stereo.monitor
-```
-
-## Conservative fallbacks
-
-Skip Qwen normalization while still creating the raw transcript:
-
-```bash
-transcriber process lecture.flac --no-llm
-```
-
-Disable FullStop punctuation restoration:
-
-```bash
-transcriber process lecture.flac --no-punctuation-model
 ```
 
 ## Privacy and course access
