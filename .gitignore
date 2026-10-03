@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+lecture-transcription-env/
+
+# Local model/cache data
+.cache/
+models/
+
+# Lecture material: never commit paid/private course media or transcripts
+recordings/
+*.flac
+*.wav
+*.mp3
+*.m4a
+*.mp4
+*.mkv
+*.raw.txt
+*.segments.json
+*.audit.json
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
